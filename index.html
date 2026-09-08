@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>微習慣養成指南</title>
+  <!-- Tailwind CSS 樣式庫 (免安裝) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PWA 手機模式設定 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+</head>
+<body class="bg-slate-100 min-h-screen pb-12 font-sans text-slate-800">
+
+  <div class="max-w-md mx-auto px-4 pt-6">
+    <!-- 標頭 -->
+    <header class="flex justify-between items-center mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-emerald-600 flex items-center gap-2">
+          🌱 微習慣追蹤器
+        </h1>
+        <p class="text-xs text-slate-500 mt-1">積少成多，看見每天累積的複利</p>
+      </div>
+      <button onclick="toggleModal(true)" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm font-medium shadow-sm transition active:scale-95">
+        + 新增習慣
+      </button>
+    </header>
+
+    <!-- 習慣列表容器 -->
+    <main id="habit-list" class="space-y-4">
+      <div class="text-center py-12 text-slate-400">
+        資料載入中，請稍候...
+      </div>
+    </main>
+  </div>
+
+  <!-- 新增習慣彈出視窗 -->
+  <div id="add-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl space-y-4">
+      <h3 class="text-lg font-bold text-slate-800">新增微習慣</h3>
+      
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 mb-1">習慣名稱</label>
+        <input type="text" id="habit-name" placeholder="例如：讀書、伏地挺身" class="w-full border rounded-xl p-2.5 text-sm outline-none focus:border-emerald-500">
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">每日保底目標</label>
+          <input type="number" id="habit-target" value="1" min="1" class="w-full border rounded-xl p-2.5 text-sm outline-none focus:border-emerald-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">單位</label>
+          <input type="text" id="habit-unit" placeholder="頁、個、分鐘" class="w-full border rounded-xl p-2.5 text-sm outline-none focus:border-emerald-500">
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-2">
+        <button onclick="toggleModal(false)" class="flex-1 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-sm font-medium">取消</button>
+        <button onclick="addNewHabit()" class="flex-1 bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-medium shadow-sm">確認新增</button>
+      </div>
+    </div>
+  </div>
+
+  <!--  Firebase 核心邏輯 -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, setDoc, doc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // ⚠️【請在這裡貼上你的 Firebase 專案設定】⚠️
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyA-Gs58FcZU584GDUaIyFsBSJLxVYPvl1c",
+  authDomain: "habit-8156b.firebaseapp.com",
+  projectId: "habit-8156b",
+  storageBucket: "habit-8156b.firebasestorage.app",
+  messagingSenderId: "911167399508",
+  appId: "1:911167399508:web:79a093c31fc870282d2fc1",
+  measurementId: "G-7DVN32C3YK"
+};
+
+    // 初始化 Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    let habits = [];
+    let logs = {};
+
+    const getTodayStr = () => new Date().toISOString().split('T')[0];
+
+    // 取得近 14 天的日期陣列
+    const getPast14Days = () => {
+      const dates = [];
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        dates.push(d.toISOString().split('T')[0]);
+      }
+      return dates;
+    };
+
+    // 監聽習慣資料變化
+    onSnapshot(collection(db, "habits"), (snapshot) => {
+      habits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      render();
+    });
+
+    // 監聽打卡紀錄變化
+    onSnapshot(collection(db, "logs"), (snapshot) => {
+      logs = {};
+      snapshot.docs.forEach(doc => {
+        logs[doc.id] = doc.data();
+      });
+      render();
+    });
+
+    // 全域方法設定
+    window.toggleModal = (show) => {
+      document.getElementById('add-modal').classList.toggle('hidden', !show);
+    };
+
+    window.addNewHabit = async () => {
+      const name = document.getElementById('habit-name').value.trim();
+      const target = Number(document.getElementById('habit-target').value) || 1;
+      const unit = document.getElementById('habit-unit').value.trim() || '次';
+
+      if (!name) return alert('請輸入習慣名稱！');
+
+      await addDoc(collection(db, "habits"), {
+        name,
+        target,
+        unit,
+        totalCount: 0,
+        createdAt: new Date().toISOString()
+      });
+
+      document.getElementById('habit-name').value = '';
+      toggleModal(false);
+    };
+
+    window.checkIn = async (habitId, currentTotal, target) => {
+      const today = getTodayStr();
+      const logId = `${habitId}_${today}`;
+
+      // 寫入打卡紀錄
+      await setDoc(doc(db, "logs", logId), {
+        habitId,
+        date: today,
+        count: target
+      });
+
+      // 更新習慣的累積總數
+      await setDoc(doc(db, "habits", habitId), {
+        totalCount: (currentTotal || 0) + 1
+      }, { merge: true });
+
+      // 呼叫震動反饋 (手機專用)
+      if (navigator.vibrate) navigator.vibrate(50);
+    };
+
+    // 渲染畫面
+    function render() {
+      const container = document.getElementById('habit-list');
+      const today = getTodayStr();
+      const past14Days = getPast14Days();
+
+      if (habits.length === 0) {
+        container.innerHTML = `
+          <div class="bg-white rounded-2xl p-8 text-center shadow-sm border border-slate-100">
+            <p class="text-slate-400 text-sm">目前還沒有新增習慣喔！</p>
+            <p class="text-xs text-slate-400 mt-1">點擊右上角「+ 新增習慣」開始建立你的第一個微習慣。</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = habits.map(habit => {
+        const isCheckedToday = !!logs[`${habit.id}_${today}`];
+        const totalLogs = habit.totalCount || 0;
+        // 等級計算邏輯：每完成 10 次升一級
+        const level = Math.floor(totalLogs / 10) + 1;
+
+        // 計算 14 天打卡綠格
+        const heatmapHtml = past14Days.map(dateStr => {
+          const isDone = !!logs[`${habit.id}_${dateStr}`];
+          const isToday = dateStr === today;
+          return `
+            <div class="flex flex-col items-center gap-1">
+              <div class="w-4 h-4 rounded-md ${isDone ? 'bg-emerald-500 shadow-sm' : 'bg-slate-200'} ${isToday ? 'ring-2 ring-emerald-400 ring-offset-1' : ''}"></div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 space-y-4">
+            <!-- 標題與等級區 -->
+            <div class="flex justify-between items-start">
+              <div>
+                <div class="flex items-center gap-2">
+                  <h2 class="font-bold text-slate-800 text-lg">${habit.name}</h2>
+                  <span class="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    Lv.${level}
+                  </span>
+                </div>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  每日保底：${habit.target} ${habit.unit} ｜ 累計完成：${totalLogs} 次
+                </p>
+              </div>
+
+              <!-- 打卡按鈕 -->
+              <button 
+                onclick="checkIn('${habit.id}', ${totalLogs}, ${habit.target})"
+                ${isCheckedToday ? 'disabled' : ''}
+                class="px-4 py-2 rounded-xl text-sm font-semibold transition ${
+                  isCheckedToday 
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                    : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-md active:scale-95'
+                }">
+                ${isCheckedToday ? '✓ 今日已完成' : '今日打卡'}
+              </button>
+            </div>
+
+            <!-- 近 14 天熱力圖與過程展示 -->
+            <div class="pt-2 border-t border-slate-50">
+              <div class="flex justify-between items-center text-[10px] text-slate-400 mb-1.5">
+                <span>近 14 天持續過程</span>
+                <span>${isCheckedToday ? '🎉 今日已達標' : '⏳ 今日待完成'}</span>
+              </div>
+              <div class="flex justify-between items-center px-1">
+                ${heatmapHtml}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  </script>
+</body>
+</html>
